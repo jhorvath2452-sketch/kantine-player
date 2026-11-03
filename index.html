@@ -1,0 +1,943 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kantinen-Player</title>
+<style>
+:root{
+  --bg:#f5f4f1; --panel:#ffffff; --ink:#1c1c1e; --muted:#6c6c72; --line:#e2e0db; --field:#fbfaf8;
+  --accent:#d6451f; --accent-ink:#ffffff; --ok:#1f7a4d; --err:#b3261e; --chip:#efede8;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131315; --panel:#1c1c1f; --ink:#f1f1f3; --muted:#a1a1a9; --line:#2d2d32; --field:#232327;
+    --chip:#29292e; --ok:#4cc38a; --err:#ff8a80; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131315; --panel:#1c1c1f; --ink:#f1f1f3; --muted:#a1a1a9; --line:#2d2d32; --field:#232327;
+  --chip:#29292e; --ok:#4cc38a; --err:#ff8a80; color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body.mode-player{background:#000;overflow:hidden}
+body.hide-cursor,body.hide-cursor *{cursor:none!important}
+
+/* ---------- Player ---------- */
+#player{position:fixed;inset:0;background:#000;--fit:contain;--fade:1.2s}
+#stage{position:absolute;inset:0}
+.layer{position:absolute;inset:0;opacity:0;transition:opacity var(--fade) ease-in-out;overflow:hidden}
+.layer.show{opacity:1}
+.layer img,.layer video{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--fit);display:block}
+.layer.kb img{animation:kb var(--kbdur,10s) linear forwards}
+@keyframes kb{from{transform:scale(1)}to{transform:scale(1.08)}}
+#clock{position:absolute;right:2.2vw;bottom:2.4vh;color:#fff;font:600 clamp(22px,3.4vw,64px)/1 system-ui,"Segoe UI",sans-serif;
+  text-shadow:0 2px 12px rgba(0,0,0,.65);font-variant-numeric:tabular-nums;z-index:5}
+#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:6vw;
+  color:#d8d8d8;font:500 clamp(18px,2.2vw,40px)/1.35 system-ui,"Segoe UI",sans-serif;z-index:4;pointer-events:none}
+#msg:empty{display:none}
+#startScreen{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3vh;
+  background:radial-gradient(ellipse at center,#222 0%,#000 70%);z-index:10;color:#bbb;font:500 clamp(14px,1.4vw,24px)/1.3 system-ui,sans-serif}
+#playBtn{width:clamp(120px,14vw,260px);height:clamp(120px,14vw,260px);border-radius:50%;border:0;background:#fff;color:#000;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 10px 50px rgba(255,255,255,.15);transition:transform .15s}
+#playBtn:hover,#playBtn:focus-visible{transform:scale(1.05);outline:none}
+#playBtn svg{width:42%;height:42%;margin-left:8%}
+#startInfo{color:#888;font-size:clamp(12px,1vw,18px)}
+
+/* ---------- Setup + Admin ---------- */
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px 64px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
+.card h2{margin:0;font-size:18px}
+.card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+h1{font-size:24px;margin:0}
+.sub{margin:2px 0 0;color:var(--muted)}
+.hint{color:var(--muted);font-size:13.5px;margin:6px 0 12px}
+code{background:var(--chip);padding:2px 6px;border-radius:6px;font-size:13px;word-break:break-all}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--field);color:var(--ink);
+  padding:8px 14px;border-radius:9px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{color:var(--err)}
+.btn.small{padding:5px 10px;font-size:13px}
+.btn:disabled{opacity:.55;cursor:default}
+input[type=text],input[type=number],select{font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--line);
+  border-radius:8px;padding:7px 10px;min-width:0}
+input[type=number]{width:90px}
+input[type=color]{width:52px;height:34px;border:1px solid var(--line);border-radius:8px;background:var(--field);padding:2px}
+input[type=range]{width:160px;accent-color:var(--accent)}
+input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);flex:none}
+.err{color:var(--err)}
+.ok{color:var(--ok)}
+
+#setup{max-width:560px;margin:8vh auto;padding:0 16px}
+#setup .card{padding:28px}
+#setup label{display:block;font-weight:600;margin:16px 0 6px}
+#setup input{width:100%}
+#setup .btn{margin-top:16px}
+body.mode-player #setup .card{background:#1c1c1f;color:#eee;border-color:#2d2d32}
+
+header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+header.top .actions{display:flex;gap:8px;flex-wrap:wrap}
+#adminStatus{margin:0 0 14px;padding:10px 14px;border-radius:10px;background:var(--chip)}
+#adminStatus:empty{display:none}
+
+.prog{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.prog:first-child{border-top:0}
+.prog .name{font-weight:600}
+.prog .meta{color:var(--muted);font-size:13px}
+.prog .grow{flex:1;min-width:0}
+.prog .tag{font-size:12px;background:var(--chip);border-radius:20px;padding:2px 8px;color:var(--muted);margin-left:6px;font-weight:500}
+
+.drop{border:2px dashed var(--line);border-radius:12px;padding:18px;text-align:center;color:var(--muted);margin:10px 0 14px}
+.drop.over{border-color:var(--accent);color:var(--ink)}
+.up{display:flex;align-items:center;gap:10px;font-size:13px;margin:6px 0}
+.up .bar{flex:1;height:6px;background:var(--chip);border-radius:4px;overflow:hidden;max-width:240px}
+.up .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.up .fn{max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.tile{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--field);display:flex;flex-direction:column}
+.thumb{aspect-ratio:16/10;background:var(--chip);display:flex;align-items:center;justify-content:center;position:relative;color:var(--muted);font-size:28px}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb .badge{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;border-radius:5px;padding:1px 6px}
+.tile .info{padding:8px 10px;display:flex;gap:6px;align-items:flex-start}
+.tile .info div{flex:1;min-width:0}
+.tile .fname{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile .fsize{font-size:12px;color:var(--muted)}
+.icon-btn{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;padding:2px 4px;border-radius:6px}
+.icon-btn:hover{color:var(--err);background:var(--chip)}
+.empty{color:var(--muted);padding:12px 0}
+
+fieldset{border:0;border-top:1px solid var(--line);margin:0;padding:14px 0 6px}
+fieldset:first-of-type{border-top:0;padding-top:4px}
+legend{font-weight:700;font-size:14px;padding:0;margin-bottom:6px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-size:12px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:8px 0;flex-wrap:wrap}
+.row > span:first-child{flex:1;min-width:180px}
+.row.check{justify-content:flex-start;cursor:pointer}
+.row.check span{flex:1}
+.unit{display:inline-flex;align-items:center;gap:8px;color:var(--muted)}
+output{min-width:40px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.form-actions{display:flex;align-items:center;gap:14px;margin-top:14px;flex-wrap:wrap}
+.storage{height:8px;background:var(--chip);border-radius:5px;overflow:hidden;margin:8px 0 4px}
+.storage i{display:block;height:100%;background:var(--accent)}
+@media (max-width:560px){ .row > span:first-child{min-width:100%} .grid{grid-template-columns:repeat(2,1fr)} }
+</style>
+</head>
+<body>
+
+<!-- ================= PLAYER ================= -->
+<div id="player" hidden>
+  <div id="stage"></div>
+  <div id="clock" hidden></div>
+  <div id="msg"></div>
+  <div id="startScreen" hidden>
+    <button id="playBtn" aria-label="Abspielen">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L7.5 3.64A1 1 0 0 0 6 4.5z"/></svg>
+    </button>
+    <div>Kantinen-Player – zum Starten klicken oder Leertaste drücken</div>
+    <div id="startInfo"></div>
+  </div>
+</div>
+
+<!-- ================= SETUP ================= -->
+<div id="setup" hidden>
+  <div class="card">
+    <h1>Kantinen-Player einrichten</h1>
+    <p class="hint">Einmalig auf diesem Gerät: Player mit deiner Dropbox-App verbinden.</p>
+    <label for="appKey">App key</label>
+    <input type="text" id="appKey" autocomplete="off" spellcheck="false" placeholder="z. B. a1b2c3d4e5f6g7h">
+    <p class="hint">Zu finden in der Dropbox App Console unter „Settings“ → „App key“.</p>
+    <p class="hint">In der App Console muss unter „OAuth 2 → Redirect URIs“ genau diese Adresse eingetragen sein:<br><code id="redirUri"></code></p>
+    <button class="btn primary" id="connectBtn">Mit Dropbox verbinden</button>
+    <p id="setupErr" class="err"></p>
+  </div>
+</div>
+
+<!-- ================= ADMIN ================= -->
+<div id="admin" hidden>
+  <div class="wrap">
+    <header class="top">
+      <div><h1>Kantinen-Player</h1><p class="sub">Verwaltung</p></div>
+      <div class="actions">
+        <a class="btn" href="#player" id="openPlayer">Player öffnen</a>
+        <button class="btn" id="logoutBtn">Abmelden</button>
+      </div>
+    </header>
+    <div id="adminStatus"></div>
+
+    <section class="card">
+      <div class="card-h"><h2>Programme</h2><button class="btn" id="newProgBtn">+ Neues Programm</button></div>
+      <p class="hint">Ein Programm ist ein Ordner mit Fotos und Videos (z. B. „Standard“, „Weihnachtsfeier“). Alle angehakten Programme laufen am Player gemischt. Änderungen werden sofort gespeichert.</p>
+      <div id="progList"><div class="empty">Lade …</div></div>
+      <div id="storageBox" hidden>
+        <div class="storage"><i id="storageBar"></i></div>
+        <div class="hint" id="storageText"></div>
+      </div>
+    </section>
+
+    <section class="card" id="folderCard" hidden>
+      <div class="card-h">
+        <h2 id="folderTitle"></h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <label class="btn primary">Dateien hochladen<input type="file" id="fileInput" multiple hidden></label>
+          <button class="btn danger" id="delFolderBtn">Programm löschen</button>
+          <button class="btn" id="closeFolderBtn">Schließen</button>
+        </div>
+      </div>
+      <div class="drop" id="drop">Dateien hierher ziehen<br><span class="hint" id="dropHint"></span></div>
+      <div id="uploads"></div>
+      <div class="grid" id="grid"></div>
+    </section>
+
+    <section class="card">
+      <h2>Einstellungen</h2>
+      <form id="settingsForm" autocomplete="off">
+        <fieldset><legend>Ablauf</legend>
+          <label class="row"><span>Reihenfolge</span>
+            <select name="order"><option value="shuffle">Zufällig</option><option value="name">Nach Dateiname</option></select></label>
+          <label class="row"><span>Anzeigedauer pro Foto</span>
+            <span class="unit"><input type="number" name="photoDuration" min="2" max="600" step="1"> Sek.</span></label>
+          <label class="row"><span>Start am Kantinen-PC</span>
+            <select name="startMode"><option value="button">Mit Play-Taste</option><option value="auto">Sofort automatisch</option></select></label>
+        </fieldset>
+        <fieldset><legend>Darstellung</legend>
+          <label class="row"><span>Übergang</span>
+            <select name="transition"><option value="fade">Überblenden</option><option value="none">Harter Schnitt</option></select></label>
+          <label class="row"><span>Dauer der Überblendung</span>
+            <span class="unit"><input type="number" name="transitionSeconds" min="0.2" max="5" step="0.1"> Sek.</span></label>
+          <label class="row"><span>Bildanpassung</span>
+            <select name="fit"><option value="contain">Ganzes Bild zeigen (Ränder möglich)</option><option value="cover">Bildschirm füllen (Ränder abgeschnitten)</option></select></label>
+          <label class="row"><span>Hintergrundfarbe</span><input type="color" name="background"></label>
+          <label class="row check"><input type="checkbox" name="kenBurns"><span>Langsamer Zoom bei Fotos</span></label>
+          <label class="row check"><input type="checkbox" name="showClock"><span>Uhrzeit einblenden</span></label>
+        </fieldset>
+        <fieldset><legend>Fotos &amp; Videos</legend>
+          <label class="row check"><input type="checkbox" name="includePhotos"><span>Fotos anzeigen</span></label>
+          <label class="row check"><input type="checkbox" name="includeVideos"><span>Videos anzeigen</span></label>
+          <label class="row check"><input type="checkbox" name="videoSound"><span>Videos mit Ton abspielen</span></label>
+          <label class="row"><span>Lautstärke Videos</span>
+            <span class="unit"><input type="range" name="videoVolume" min="0" max="100" step="5"><output data-for="videoVolume"></output></span></label>
+          <label class="row"><span>Videos abbrechen nach (0 = ganz abspielen)</span>
+            <span class="unit"><input type="number" name="videoMaxSeconds" min="0" max="600" step="5"> Sek.</span></label>
+        </fieldset>
+        <fieldset><legend>Hintergrundmusik</legend>
+          <label class="row check"><input type="checkbox" name="music"><span>Hintergrundmusik abspielen (Dateien aus „Musik“, zufällig)</span></label>
+          <label class="row"><span>Lautstärke Musik</span>
+            <span class="unit"><input type="range" name="musicVolume" min="0" max="100" step="5"><output data-for="musicVolume"></output></span></label>
+          <label class="row check"><input type="checkbox" name="musicDuck"><span>Musik leiser, während ein Video mit Ton läuft</span></label>
+        </fieldset>
+        <fieldset><legend>Technik</legend>
+          <label class="row"><span>Zusätzlich auf neue Dateien prüfen alle</span>
+            <span class="unit"><input type="number" name="refreshMinutes" min="1" max="120" step="1"> Min.</span></label>
+        </fieldset>
+      </form>
+      <div class="form-actions">
+        <button class="btn primary" id="saveBtn">Speichern</button>
+        <span id="saveMsg" class="hint" style="margin:0"></span>
+      </div>
+    </section>
+
+    <p class="hint">Fotos: JPG, PNG, WEBP, GIF · Videos: MP4 (H.264, max. Full HD empfohlen), WEBM · Musik: MP3, M4A, AAC, OGG, WAV.<br>
+      Am Kantinen-PC: Pfeil rechts = nächstes Bild/Video · Alt+F4 = Player beenden.</p>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* =========================================================================
+   Kantinen-Player – Fotos & Kurzvideos aus Dropbox in Endlosschleife
+   Ein einziges File: Player (Standard) und Verwaltung (#admin).
+   ========================================================================= */
+
+// Optional: App key hier fest eintragen – dann wird er auf keinem Gerät abgefragt.
+const APP_KEY_FIXED = '';
+
+const REDIRECT = location.origin + location.pathname.replace(/index\.html$/i, '');
+const MUSIC_FOLDER = 'Musik';
+const DEFAULTS = {
+  programs: ['Standard'], order: 'shuffle', photoDuration: 8, startMode: 'button',
+  transition: 'fade', transitionSeconds: 1.2, fit: 'contain', background: '#000000',
+  kenBurns: false, showClock: false,
+  includePhotos: true, includeVideos: true, videoSound: false, videoVolume: 80, videoMaxSeconds: 0,
+  music: false, musicVolume: 40, musicDuck: true,
+  refreshMinutes: 10, updated: ''
+};
+const IMG = ['jpg','jpeg','png','gif','webp','bmp'];
+const VID = ['mp4','m4v','webm','mov'];
+const AUD = ['mp3','m4a','aac','ogg','oga','opus','wav'];
+const MIME = { jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', gif:'image/gif', webp:'image/webp', bmp:'image/bmp',
+  mp4:'video/mp4', m4v:'video/mp4', mov:'video/mp4', webm:'video/webm',
+  mp3:'audio/mpeg', m4a:'audio/mp4', aac:'audio/aac', ogg:'audio/ogg', oga:'audio/ogg', opus:'audio/ogg', wav:'audio/wav' };
+
+/* ---------------- Hilfsfunktionen ---------------- */
+const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem('kp_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('kp_' + k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem('kp_' + k); } catch (e) {} }
+};
+function ext(n) { const i = n.lastIndexOf('.'); return i < 0 ? '' : n.slice(i + 1).toLowerCase(); }
+function kindOf(n) { const e = ext(n); return IMG.includes(e) ? 'image' : VID.includes(e) ? 'video' : AUD.includes(e) ? 'audio' : null; }
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function b64url(bytes) { let s = ''; bytes.forEach(b => s += String.fromCharCode(b)); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+// Dropbox-API-Arg muss reines ASCII sein (Umlaute escapen)
+function hjson(o) { return JSON.stringify(o).replace(/[\u007f-\uffff]/g, c => '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4)); }
+function fmtSize(n) {
+  if (n < 1024 * 1024) return Math.max(1, Math.round(n / 1024)) + ' KB';
+  if (n < 1024 ** 3) return (n / 1048576).toFixed(n < 10485760 ? 1 : 0).replace('.', ',') + ' MB';
+  return (n / 1024 ** 3).toFixed(2).replace('.', ',') + ' GB';
+}
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of kids.flat()) if (c != null) e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return e;
+}
+
+class AuthError extends Error {}
+class NetError extends Error {}
+class DbxError extends Error {
+  constructor(status, body) { super('Dropbox-Fehler ' + status + (body ? ': ' + String(body).slice(0, 200) : '')); this.status = status; this.body = body; }
+}
+const notFound = e => e instanceof DbxError && e.status === 409 && /not_found/.test(e.body || '');
+
+/* ---------------- Dropbox-Anmeldung (OAuth PKCE, ohne Secret) ---------------- */
+const Auth = {
+  access: null, exp: 0,
+  appKey() { return APP_KEY_FIXED || LS.get('appKey', ''); },
+  connected() { return !!this.appKey() && !!LS.get('refresh', ''); },
+  async login(key, mode) {
+    if (key) LS.set('appKey', key.trim());
+    const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+    LS.set('pkce', verifier); LS.set('returnMode', mode);
+    const u = new URL('https://www.dropbox.com/oauth2/authorize');
+    u.search = new URLSearchParams({
+      client_id: this.appKey(), response_type: 'code', code_challenge: b64url(new Uint8Array(digest)),
+      code_challenge_method: 'S256', token_access_type: 'offline', redirect_uri: REDIRECT
+    }).toString();
+    location.href = u.toString();
+  },
+  async handleRedirect() {
+    const p = new URLSearchParams(location.search);
+    const mode = LS.get('returnMode', 'player');
+    const clean = () => history.replaceState(null, '', REDIRECT + (mode === 'admin' ? '#admin' : ''));
+    if (p.get('error')) { clean(); return { mode, error: 'Anmeldung abgebrochen: ' + (p.get('error_description') || p.get('error')) }; }
+    const code = p.get('code'); if (!code) return null;
+    const r = await fetch('https://api.dropboxapi.com/oauth2/token', { method: 'POST', body: new URLSearchParams({
+      code, grant_type: 'authorization_code', code_verifier: LS.get('pkce', ''), client_id: this.appKey(), redirect_uri: REDIRECT }) });
+    clean();
+    if (!r.ok) return { mode, error: 'Anmeldung fehlgeschlagen (' + r.status + '): ' + (await r.text()).slice(0, 200) };
+    const j = await r.json();
+    LS.set('refresh', j.refresh_token); LS.del('pkce');
+    this.access = j.access_token; this.exp = Date.now() + (j.expires_in - 120) * 1000;
+    return { mode };
+  },
+  async token() {
+    if (this.access && Date.now() < this.exp) return this.access;
+    const rt = LS.get('refresh', '');
+    if (!rt || !this.appKey()) throw new AuthError('Nicht mit Dropbox verbunden.');
+    let r;
+    try { r = await fetch('https://api.dropboxapi.com/oauth2/token', { method: 'POST',
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: rt, client_id: this.appKey() }) }); }
+    catch (e) { throw new NetError('Keine Verbindung zu Dropbox.'); }
+    if (r.status === 400 || r.status === 401) { LS.del('refresh'); throw new AuthError('Die Dropbox-Verbindung ist nicht mehr gültig. Bitte neu verbinden.'); }
+    if (!r.ok) throw new NetError('Dropbox antwortet nicht (' + r.status + ').');
+    const j = await r.json();
+    this.access = j.access_token; this.exp = Date.now() + (j.expires_in - 120) * 1000;
+    return this.access;
+  },
+  async logout() {
+    try { if (this.connected()) await dbxFetch('https://api.dropboxapi.com/2/auth/token/revoke', { method: 'POST' }); } catch (e) {}
+    LS.del('refresh'); this.access = null;
+  }
+};
+
+/* ---------------- Dropbox-API ---------------- */
+async function dbxFetch(url, init) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const t = await Auth.token();
+    const opts = Object.assign({}, init, { headers: Object.assign({}, init.headers, { Authorization: 'Bearer ' + t }) });
+    let r;
+    try { r = await fetch(url, opts); } catch (e) { throw new NetError('Keine Verbindung zu Dropbox.'); }
+    if (r.status === 401) { Auth.access = null; continue; }
+    if (r.status === 429 || r.status >= 500) { await sleep(1500 * (attempt + 1)); continue; }
+    if (!r.ok) throw new DbxError(r.status, await r.text());
+    return r;
+  }
+  throw new NetError('Dropbox ist gerade nicht erreichbar.');
+}
+const Dbx = {
+  async rpc(ep, args) {
+    const r = await dbxFetch('https://api.dropboxapi.com/2/' + ep, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+    const txt = await r.text(); return txt ? JSON.parse(txt) : null;
+  },
+  async content(ep, arg, body) {
+    const headers = { 'Dropbox-API-Arg': hjson(arg) };
+    if (body !== undefined) headers['Content-Type'] = 'application/octet-stream';
+    return dbxFetch('https://content.dropboxapi.com/2/' + ep, { method: 'POST', headers, body });
+  },
+  async contentJson(ep, arg, body) { const r = await this.content(ep, arg, body); const t = await r.text(); return t ? JSON.parse(t) : null; },
+  async download(path) { const r = await this.content('files/download', { path }); return r.blob(); },
+  async listAll(path, recursive) {
+    let r = await this.rpc('files/list_folder', { path, recursive: !!recursive, include_deleted: false });
+    let entries = r.entries;
+    while (r.has_more) { r = await this.rpc('files/list_folder/continue', { cursor: r.cursor }); entries = entries.concat(r.entries); }
+    return entries;
+  },
+  async meta(path) { try { return await this.rpc('files/get_metadata', { path }); } catch (e) { if (notFound(e)) return null; throw e; } },
+  async getText(path) { try { const r = await this.content('files/download', { path }); return await r.text(); } catch (e) { if (notFound(e)) return null; throw e; } },
+  async putText(path, text) { return this.contentJson('files/upload', { path, mode: 'overwrite', mute: true }, new Blob([text])); },
+  async createFolder(path) { try { await this.rpc('files/create_folder_v2', { path, autorename: false }); } catch (e) { if (!(e instanceof DbxError && e.status === 409)) throw e; } },
+  async remove(path) { return this.rpc('files/delete_v2', { path }); },
+  async upload(file, path, onProgress) {
+    const CH = 8 * 1024 * 1024;
+    const commit = { path, mode: 'add', autorename: true, mute: true };
+    if (file.size <= CH) { await this.contentJson('files/upload', commit, file); onProgress(1); return; }
+    const s = await this.contentJson('files/upload_session/start', { close: false }, file.slice(0, CH));
+    let off = CH; onProgress(off / file.size);
+    while (off < file.size) {
+      const end = Math.min(off + CH, file.size);
+      if (end < file.size) await this.contentJson('files/upload_session/append_v2', { cursor: { session_id: s.session_id, offset: off }, close: false }, file.slice(off, end));
+      else await this.contentJson('files/upload_session/finish', { cursor: { session_id: s.session_id, offset: off }, commit }, file.slice(off, end));
+      off = end; onProgress(off / file.size);
+    }
+  },
+  async thumbnails(paths) {
+    const r = await dbxFetch('https://content.dropboxapi.com/2/files/get_thumbnail_batch', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries: paths.map(path => ({ path, format: 'jpeg', size: 'w256h256', mode: 'fitone_bestfit' })) }) });
+    return (await r.json()).entries;
+  }
+};
+
+async function loadSettings() {
+  const txt = await Dbx.getText('/settings.json');
+  let s = {}; if (txt) { try { s = JSON.parse(txt); } catch (e) {} }
+  return Object.assign({}, DEFAULTS, s);
+}
+async function listPrograms() {
+  const root = await Dbx.listAll('', false);
+  return root.filter(e => e['.tag'] === 'folder' && e.name.toLowerCase() !== MUSIC_FOLDER.toLowerCase())
+             .map(e => e.name).sort((a, b) => a.localeCompare(b, 'de'));
+}
+async function loadLibrary(settings) {
+  const progs = await listPrograms();
+  const wanted = progs.filter(p => settings.programs.some(x => x.toLowerCase() === p.toLowerCase()));
+  const seen = new Set(), items = [];
+  for (const p of wanted) {
+    for (const e of await Dbx.listAll('/' + p, true)) {
+      if (e['.tag'] !== 'file' || seen.has(e.rev)) continue;
+      const k = kindOf(e.name);
+      if ((k === 'image' && settings.includePhotos) || (k === 'video' && settings.includeVideos)) {
+        seen.add(e.rev); items.push({ path: e.path_lower, display: e.path_display, name: e.name, rev: e.rev, size: e.size, type: k });
+      }
+    }
+  }
+  let music = [];
+  if (settings.music) {
+    try {
+      music = (await Dbx.listAll('/' + MUSIC_FOLDER, true))
+        .filter(e => e['.tag'] === 'file' && kindOf(e.name) === 'audio')
+        .map(e => ({ path: e.path_lower, display: e.path_display, name: e.name, rev: e.rev, size: e.size, type: 'audio' }));
+    } catch (e) { if (!notFound(e)) throw e; }
+  }
+  return { items, music };
+}
+
+/* ---------------- Lokaler Zwischenspeicher (läuft auch offline weiter) ---------------- */
+const MediaCache = {
+  NAME: 'kantine-media-v1', inflight: new Map(),
+  req(item) { return new Request(REDIRECT + '__media/' + encodeURIComponent(item.rev)); },
+  type(item) { return MIME[ext(item.name)] || 'application/octet-stream'; },
+  async has(item) { try { const c = await caches.open(this.NAME); return !!(await c.match(this.req(item))); } catch (e) { return false; } },
+  async getBlob(item) {
+    const t = this.type(item);
+    try {
+      const c = await caches.open(this.NAME); const hit = await c.match(this.req(item));
+      if (hit) { const b = await hit.blob(); return b.type === t ? b : new Blob([b], { type: t }); }
+    } catch (e) {}
+    if (this.inflight.has(item.rev)) return this.inflight.get(item.rev);
+    const p = (async () => {
+      const raw = await Dbx.download(item.path);
+      const b = new Blob([raw], { type: t });
+      try { const c = await caches.open(this.NAME); await c.put(this.req(item), new Response(b, { headers: { 'Content-Type': t } })); }
+      catch (e) { console.warn('Zwischenspeicher nicht möglich', e); }
+      return b;
+    })();
+    this.inflight.set(item.rev, p);
+    try { return await p; } finally { this.inflight.delete(item.rev); }
+  },
+  async prune(keep) {
+    try {
+      const c = await caches.open(this.NAME);
+      for (const r of await c.keys()) { const rev = decodeURIComponent(r.url.split('/__media/')[1] || ''); if (!keep.has(rev)) await c.delete(r); }
+    } catch (e) {}
+  }
+};
+
+/* =========================================================================
+   PLAYER
+   ========================================================================= */
+const P = {
+  settings: Object.assign({}, DEFAULTS), settingsRev: null, items: [], music: [], libSig: '', lastLib: 0,
+  bag: [], bagPos: 0, last: null, layer: null, timer: null, token: 0, fails: 0, started: false,
+  audio: new Audio(), musicBag: [], musicPos: 0, musicUrl: null, ducked: false, warmToken: 0, bootTime: Date.now(), wake: null
+};
+
+function fadeMs() { return P.settings.transition === 'fade' ? Math.round(P.settings.transitionSeconds * 1000) : 0; }
+function libSignature(lib) { return lib.items.map(i => i.rev).join('|') + '#' + lib.music.map(i => i.rev).join('|'); }
+
+function applySettings() {
+  const pl = $('#player'), s = P.settings;
+  pl.style.setProperty('--fit', s.fit === 'cover' ? 'cover' : 'contain');
+  pl.style.setProperty('--fade', fadeMs() / 1000 + 's');
+  pl.style.background = s.background || '#000';
+  $('#clock').hidden = !s.showClock;
+  applyMusicVolume(); updateMusic();
+}
+
+function rebuildBag() {
+  const arr = P.items.slice();
+  if (P.settings.order === 'shuffle') {
+    shuffle(arr);
+    if (arr.length > 1 && P.last && arr[0].rev === P.last.rev) arr.push(arr.shift());
+    P.bag = arr; P.bagPos = 0;
+  } else {
+    arr.sort((a, b) => a.display.localeCompare(b.display, 'de', { numeric: true }));
+    P.bag = arr;
+    const i = P.last ? arr.findIndex(x => x.rev === P.last.rev) : -1;
+    P.bagPos = i >= 0 ? i + 1 : 0;
+  }
+}
+function nextItem() { if (!P.items.length) return null; if (P.bagPos >= P.bag.length) rebuildBag(); return P.bag[P.bagPos++] || null; }
+function peekItem() { if (!P.items.length) return null; if (P.bagPos >= P.bag.length) rebuildBag(); return P.bag[P.bagPos] || null; }
+function setMsg(t) { $('#msg').textContent = t || ''; }
+
+function prepImage(url) { const img = new Image(); img.alt = ''; img.src = url; return img.decode().then(() => img); }
+function prepVideo(url) {
+  return new Promise((res, rej) => {
+    const v = document.createElement('video');
+    v.preload = 'auto'; v.playsInline = true; v.muted = true; v.src = url;
+    const to = setTimeout(() => rej(new Error('Video lädt nicht')), 20000);
+    v.oncanplay = () => { clearTimeout(to); v.oncanplay = null; res(v); };
+    v.onerror = () => { clearTimeout(to); rej(new Error('Video nicht abspielbar')); };
+  });
+}
+
+async function playNext() {
+  clearTimeout(P.timer);
+  const my = ++P.token;
+  // Nach langer Laufzeit einmal sauber neu laden (Speicher frei machen)
+  if (Date.now() - P.bootTime > 20 * 3600 * 1000 && navigator.onLine) { location.reload(); return; }
+  const item = nextItem();
+  if (!item) {
+    setMsg(P.settings.programs.length ? 'Noch keine Fotos oder Videos im aktiven Programm.\nInhalte werden laufend geprüft …' : 'Kein Programm aktiviert.');
+    P.timer = setTimeout(playNext, 20000); return;
+  }
+  let url, el;
+  try {
+    const blob = await MediaCache.getBlob(item);
+    if (my !== P.token) return;
+    url = URL.createObjectURL(blob);
+    el = item.type === 'image' ? await prepImage(url) : await prepVideo(url);
+  } catch (e) {
+    console.warn('Überspringe', item.display, e);
+    if (url) URL.revokeObjectURL(url);
+    P.fails++;
+    if (P.fails >= Math.max(3, P.items.length)) setMsg('Inhalte können gerade nicht geladen werden.\nNeuer Versuch läuft …');
+    P.timer = setTimeout(playNext, P.fails >= P.items.length ? 15000 : 400); return;
+  }
+  if (my !== P.token) { URL.revokeObjectURL(url); return; }
+  P.fails = 0; setMsg('');
+
+  const layer = h('div', { class: 'layer' + (item.type === 'image' && P.settings.kenBurns ? ' kb' : '') }, el);
+  layer._url = url;
+  if (item.type === 'image') layer.style.setProperty('--kbdur', (P.settings.photoDuration + fadeMs() / 1000 * 2) + 's');
+  $('#stage').append(layer);
+  void layer.offsetWidth;
+  layer.classList.add('show');
+
+  const old = P.layer; P.layer = layer; P.last = item;
+  if (old) {
+    old.classList.remove('show');
+    const ov = old.querySelector('video'); if (ov) ov.muted = true;
+    setTimeout(() => { if (ov) { ov.pause(); ov.removeAttribute('src'); ov.load(); } URL.revokeObjectURL(old._url); old.remove(); }, fadeMs() + 150);
+  }
+
+  if (item.type === 'image') P.timer = setTimeout(playNext, Math.max(2, P.settings.photoDuration) * 1000);
+  else startVideo(el, my);
+
+  const n = peekItem(); if (n) MediaCache.getBlob(n).catch(() => {});
+}
+
+function startVideo(v, my) {
+  const s = P.settings;
+  let done = false;
+  const finish = () => { if (done) return; done = true; duck(false); if (my === P.token) playNext(); };
+  v.onended = finish; v.onerror = finish;
+  v.muted = !s.videoSound; v.volume = Math.max(0, Math.min(1, s.videoVolume / 100));
+  const p = v.play();
+  if (p) p.then(() => { if (!v.muted) duck(true); }).catch(() => { v.muted = true; v.play().catch(finish); });
+  const max = s.videoMaxSeconds > 0 ? s.videoMaxSeconds : (isFinite(v.duration) && v.duration > 0 ? v.duration + 5 : 600);
+  P.timer = setTimeout(finish, max * 1000);
+}
+
+/* ---- Musik ---- */
+P.audio.preload = 'auto';
+P.audio.addEventListener('ended', () => musicNext());
+P.audio.addEventListener('error', () => setTimeout(musicNext, 3000));
+function applyMusicVolume() { P.audio.volume = Math.max(0, Math.min(1, P.settings.musicVolume / 100 * (P.ducked && P.settings.musicDuck ? 0.15 : 1))); }
+function duck(on) { P.ducked = on; applyMusicVolume(); }
+function stopMusic() { P.audio.pause(); }
+function updateMusic() {
+  if (!P.started) return;
+  if (P.settings.music && P.music.length) { if (P.audio.paused) { if (P.audio.src && !P.audio.ended) P.audio.play().catch(() => {}); else musicNext(); } }
+  else stopMusic();
+}
+async function musicNext() {
+  if (!P.started || !P.settings.music || !P.music.length) { stopMusic(); return; }
+  if (P.musicPos >= P.musicBag.length) { P.musicBag = shuffle(P.music.slice()); P.musicPos = 0; }
+  const t = P.musicBag[P.musicPos++];
+  try {
+    const b = await MediaCache.getBlob(t);
+    if (P.musicUrl) URL.revokeObjectURL(P.musicUrl);
+    P.musicUrl = URL.createObjectURL(b);
+    P.audio.src = P.musicUrl; applyMusicVolume();
+    await P.audio.play();
+  } catch (e) { setTimeout(musicNext, 5000); }
+}
+
+/* ---- Laden & Aktualisieren ---- */
+function setLibrary(lib) {
+  const sig = libSignature(lib);
+  if (sig === P.libSig) return;
+  P.libSig = sig; P.items = lib.items; P.music = lib.music;
+  LS.set('lib', lib);
+  if (P.started) { rebuildBag(); P.musicBag = []; P.musicPos = 0; updateMusic(); }
+  MediaCache.prune(new Set([...lib.items, ...lib.music].map(x => x.rev)));
+  warmCache();
+}
+async function warmCache() {
+  const my = ++P.warmToken;
+  for (const it of [...P.items, ...P.music]) {
+    if (my !== P.warmToken) return;
+    if (await MediaCache.has(it)) continue;
+    try { await MediaCache.getBlob(it); } catch (e) { if (e instanceof AuthError) return; await sleep(5000); }
+  }
+}
+async function refreshAll(force) {
+  const m = await Dbx.meta('/settings.json');
+  const rev = m ? m.rev : 'none';
+  let libNeeded = force || Date.now() - P.lastLib > P.settings.refreshMinutes * 60000;
+  if (rev !== P.settingsRev) {
+    P.settings = await loadSettings(); P.settingsRev = rev;
+    LS.set('settings', P.settings); LS.set('settingsRev', rev);
+    applySettings(); libNeeded = true;
+  }
+  if (libNeeded) { setLibrary(await loadLibrary(P.settings)); P.lastLib = Date.now(); }
+}
+async function tick() {
+  try { await refreshAll(false); }
+  catch (e) {
+    if (e instanceof AuthError) { setMsg('Dropbox-Verbindung abgelaufen – bitte am PC neu verbinden.'); if (!P.items.length) { showSetup('player', e.message); return; } }
+    else console.warn('Aktualisierung fehlgeschlagen (läuft mit gespeicherten Inhalten weiter)', e);
+  }
+  setTimeout(tick, 60000);
+}
+
+async function keepAwake() { try { if ('wakeLock' in navigator && document.visibilityState === 'visible') P.wake = await navigator.wakeLock.request('screen'); } catch (e) {} }
+
+function begin() {
+  if (P.started) return;
+  P.started = true;
+  $('#startScreen').hidden = true;
+  if (!document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+  keepAwake();
+  rebuildBag(); playNext(); updateMusic();
+}
+
+async function startPlayer(err) {
+  document.body.className = 'mode-player';
+  $('#player').hidden = false;
+  P.settings = Object.assign({}, DEFAULTS, LS.get('settings', {}));
+  P.settingsRev = LS.get('settingsRev', null);
+  const cached = LS.get('lib', null);
+  if (cached) { P.items = cached.items || []; P.music = cached.music || []; P.libSig = libSignature({ items: P.items, music: P.music }); }
+  applySettings();
+  if (!Auth.connected() || err) { showSetup('player', err); return; }
+
+  // Mauszeiger ausblenden, wenn er nicht bewegt wird
+  let mt; const showCursor = () => { document.body.classList.remove('hide-cursor'); clearTimeout(mt); mt = setTimeout(() => document.body.classList.add('hide-cursor'), 2500); };
+  document.addEventListener('mousemove', showCursor); showCursor();
+  document.addEventListener('visibilitychange', keepAwake);
+  document.addEventListener('keydown', e => {
+    if (!P.started && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); begin(); }
+    else if (P.started && e.key === 'ArrowRight') playNext();
+  });
+  $('#playBtn').addEventListener('click', begin);
+
+  const first = refreshAll(true).catch(e => { if (e instanceof AuthError) throw e; console.warn(e); });
+  if (!P.items.length) { setMsg('Lade Inhalte aus der Dropbox …'); try { await first; } catch (e) { showSetup('player', e.message); return; } setMsg(''); }
+  else warmCache();
+  setTimeout(tick, 60000);
+
+  if (P.settings.startMode === 'auto') begin();
+  else {
+    $('#startScreen').hidden = false;
+    $('#startInfo').textContent = P.items.length ? P.items.length + ' Fotos/Videos bereit' : '';
+    $('#playBtn').focus();
+  }
+}
+
+/* =========================================================================
+   SETUP
+   ========================================================================= */
+function showSetup(mode, err) {
+  $('#player').hidden = true;
+  $('#admin').hidden = true;
+  document.body.className = mode === 'player' ? 'mode-player' : '';
+  $('#setup').hidden = false;
+  $('#appKey').value = Auth.appKey();
+  if (APP_KEY_FIXED) $('#appKey').closest('.card').querySelectorAll('#appKey, label[for=appKey]').forEach(e => e.hidden = true);
+  $('#redirUri').textContent = REDIRECT;
+  $('#setupErr').textContent = err || '';
+  $('#connectBtn').onclick = () => {
+    const k = APP_KEY_FIXED || $('#appKey').value.trim();
+    if (!k) { $('#setupErr').textContent = 'Bitte den App key eingeben.'; return; }
+    Auth.login(k, mode).catch(e => $('#setupErr').textContent = e.message);
+  };
+}
+
+/* =========================================================================
+   VERWALTUNG (#admin)
+   ========================================================================= */
+const A = { settings: null, programs: [], folder: null, stats: {} };
+
+function status(t, kind) { const s = $('#adminStatus'); s.textContent = t || ''; s.className = kind || ''; }
+function adminError(e) {
+  console.error(e);
+  if (e instanceof AuthError) { showSetup('admin', e.message); return; }
+  status(e.message || String(e), 'err');
+}
+async function saveSettings(note) {
+  A.settings.updated = new Date().toISOString();
+  await Dbx.putText('/settings.json', JSON.stringify(A.settings, null, 2));
+  if (note) { $('#saveMsg').textContent = note; $('#saveMsg').className = 'ok'; }
+}
+
+function fillForm() {
+  const f = $('#settingsForm');
+  for (const el of f.elements) {
+    if (!el.name || !(el.name in A.settings)) continue;
+    if (el.type === 'checkbox') el.checked = !!A.settings[el.name]; else el.value = A.settings[el.name];
+  }
+  f.querySelectorAll('output').forEach(o => o.textContent = f.elements[o.dataset.for].value + ' %');
+}
+function readForm() {
+  const f = $('#settingsForm'), s = A.settings;
+  const num = (n, lo, hi) => { const v = parseFloat(f.elements[n].value); return isNaN(v) ? DEFAULTS[n] : Math.min(hi, Math.max(lo, v)); };
+  s.order = f.elements.order.value; s.startMode = f.elements.startMode.value;
+  s.photoDuration = num('photoDuration', 2, 600); s.transition = f.elements.transition.value;
+  s.transitionSeconds = num('transitionSeconds', 0.2, 5); s.fit = f.elements.fit.value; s.background = f.elements.background.value;
+  ['kenBurns', 'showClock', 'includePhotos', 'includeVideos', 'videoSound', 'music', 'musicDuck'].forEach(k => s[k] = f.elements[k].checked);
+  s.videoVolume = num('videoVolume', 0, 100); s.videoMaxSeconds = num('videoMaxSeconds', 0, 600);
+  s.musicVolume = num('musicVolume', 0, 100); s.refreshMinutes = num('refreshMinutes', 1, 120);
+}
+
+async function renderPrograms() {
+  const list = $('#progList');
+  const root = await Dbx.listAll('', false);
+  const folders = root.filter(e => e['.tag'] === 'folder');
+  A.programs = folders.map(e => e.name).filter(n => n.toLowerCase() !== MUSIC_FOLDER.toLowerCase()).sort((a, b) => a.localeCompare(b, 'de'));
+  const hasMusic = folders.some(e => e.name.toLowerCase() === MUSIC_FOLDER.toLowerCase());
+  if (!A.programs.length) { await Dbx.createFolder('/Standard'); A.programs = ['Standard']; }
+  if (!hasMusic) await Dbx.createFolder('/' + MUSIC_FOLDER);
+
+  list.replaceChildren();
+  const rows = {};
+  for (const p of A.programs) {
+    const active = A.settings.programs.some(x => x.toLowerCase() === p.toLowerCase());
+    const cb = h('input', { type: 'checkbox', 'aria-label': 'Programm ' + p + ' aktiv' }); cb.checked = active;
+    cb.addEventListener('change', async () => {
+      A.settings.programs = A.settings.programs.filter(x => x.toLowerCase() !== p.toLowerCase());
+      if (cb.checked) A.settings.programs.push(p);
+      try { await saveSettings(); status('Programmauswahl gespeichert – der Player übernimmt sie in ca. einer Minute.', 'ok'); }
+      catch (e) { cb.checked = !cb.checked; adminError(e); }
+    });
+    const meta = h('div', { class: 'meta' }, 'zähle …');
+    rows[p] = meta;
+    list.append(h('div', { class: 'prog' }, cb, h('div', { class: 'grow' }, h('div', { class: 'name' }, p), meta),
+      h('button', { class: 'btn small', onclick: () => openFolder(p) }, 'Öffnen')));
+  }
+  const mMeta = h('div', { class: 'meta' }, 'zähle …'); rows[MUSIC_FOLDER] = mMeta;
+  list.append(h('div', { class: 'prog' }, h('span', { style: 'width:18px;text-align:center' }, '♪'),
+    h('div', { class: 'grow' }, h('div', { class: 'name' }, MUSIC_FOLDER, h('span', { class: 'tag' }, 'Hintergrundmusik')), mMeta),
+    h('button', { class: 'btn small', onclick: () => openFolder(MUSIC_FOLDER) }, 'Öffnen')));
+
+  let total = 0;
+  for (const name of [...A.programs, MUSIC_FOLDER]) {
+    try {
+      const files = (await Dbx.listAll('/' + name, true)).filter(e => e['.tag'] === 'file');
+      const size = files.reduce((a, e) => a + e.size, 0); total += size;
+      const ph = files.filter(e => kindOf(e.name) === 'image').length, vi = files.filter(e => kindOf(e.name) === 'video').length,
+            au = files.filter(e => kindOf(e.name) === 'audio').length;
+      rows[name].textContent = name === MUSIC_FOLDER ? `${au} Titel · ${fmtSize(size)}` : `${ph} Fotos · ${vi} Videos · ${fmtSize(size)}`;
+    } catch (e) { rows[name].textContent = '–'; }
+  }
+  const cap = 2 * 1024 ** 3;
+  $('#storageBox').hidden = false;
+  $('#storageBar').style.width = Math.min(100, total / cap * 100) + '%';
+  $('#storageText').textContent = `Player-Ordner belegt ${fmtSize(total)} von ca. 2 GB (kostenloses Dropbox-Konto, inkl. anderer Dateien im Konto).`;
+}
+
+async function openFolder(name) {
+  A.folder = name;
+  const isMusic = name === MUSIC_FOLDER;
+  $('#folderCard').hidden = false;
+  $('#folderTitle').textContent = isMusic ? 'Musik' : 'Programm: ' + name;
+  $('#delFolderBtn').hidden = isMusic;
+  $('#fileInput').accept = isMusic ? AUD.map(e => '.' + e).join(',') : [...IMG, ...VID].map(e => '.' + e).join(',');
+  $('#dropHint').textContent = isMusic ? 'MP3, M4A, AAC, OGG, WAV' : 'Fotos (JPG, PNG, WEBP, GIF) und Videos (MP4, WEBM)';
+  $('#folderCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const grid = $('#grid'); grid.replaceChildren(h('div', { class: 'empty' }, 'Lade …'));
+  try {
+    const files = (await Dbx.listAll('/' + name, true)).filter(e => e['.tag'] === 'file')
+      .sort((a, b) => a.path_display.localeCompare(b.path_display, 'de', { numeric: true }));
+    if (A.folder !== name) return;
+    grid.replaceChildren();
+    if (!files.length) { grid.append(h('div', { class: 'empty' }, 'Noch keine Dateien. Hochladen per Knopf oder Drag & Drop – oder direkt in der Dropbox-App in den Ordner „' + name + '“ legen.')); return; }
+    const thumbs = [];
+    for (const f of files) {
+      const k = kindOf(f.name);
+      const th = h('div', { class: 'thumb' }, k === 'audio' ? '♪' : k === 'video' ? '▶' : k === 'image' ? '🖼' : '?');
+      if (k === 'video') th.append(h('span', { class: 'badge' }, 'Video'));
+      if (!k) th.append(h('span', { class: 'badge' }, 'wird ignoriert'));
+      if (k === 'image' || k === 'video') thumbs.push({ path: f.path_lower, th });
+      const rel = f.path_display.slice(name.length + 2);
+      grid.append(h('div', { class: 'tile' }, th, h('div', { class: 'info' },
+        h('div', {}, h('div', { class: 'fname', title: rel }, rel), h('div', { class: 'fsize' }, fmtSize(f.size))),
+        h('button', { class: 'icon-btn', title: 'Löschen', 'aria-label': 'Löschen', onclick: () => deleteFile(f, name) }, '✕'))));
+    }
+    for (let i = 0; i < thumbs.length; i += 25) {
+      const chunk = thumbs.slice(i, i + 25);
+      try {
+        const res = await Dbx.thumbnails(chunk.map(c => c.path));
+        res.forEach((r, j) => {
+          if (r['.tag'] === 'success') { const badge = chunk[j].th.querySelector('.badge'); chunk[j].th.replaceChildren(h('img', { src: 'data:image/jpeg;base64,' + r.thumbnail, alt: '' })); if (badge) chunk[j].th.append(badge); }
+        });
+      } catch (e) { console.warn('Vorschaubilder', e); }
+      if (A.folder !== name) return;
+    }
+  } catch (e) { adminError(e); }
+}
+
+async function deleteFile(f, folder) {
+  if (!confirm('„' + f.name + '“ wirklich löschen?')) return;
+  try { await Dbx.remove(f.path_lower); await saveSettings(); status('Gelöscht: ' + f.name, 'ok'); openFolder(folder); renderPrograms(); }
+  catch (e) { adminError(e); }
+}
+
+async function uploadFiles(fileList) {
+  const folder = A.folder; if (!folder) return;
+  const isMusic = folder === MUSIC_FOLDER;
+  const box = $('#uploads');
+  let okCount = 0;
+  for (const file of fileList) {
+    const k = kindOf(file.name);
+    const allowed = isMusic ? k === 'audio' : (k === 'image' || k === 'video');
+    const bar = h('i'), state = h('span', { class: 'hint', style: 'margin:0' }, '');
+    const row = h('div', { class: 'up' }, h('span', { class: 'fn', title: file.name }, file.name), h('span', { class: 'bar' }, bar), state);
+    box.append(row);
+    if (!allowed) { state.textContent = 'Dateityp passt nicht in diesen Ordner'; state.className = 'err'; continue; }
+    if (k === 'video' && file.size > 400 * 1024 * 1024) { state.textContent = 'Video sehr groß (' + fmtSize(file.size) + ') – lädt trotzdem …'; }
+    try {
+      await Dbx.upload(file, '/' + folder + '/' + file.name.replace(/[\\/]/g, '_'), p => bar.style.width = Math.round(p * 100) + '%');
+      state.textContent = 'fertig'; state.className = 'ok'; okCount++;
+      setTimeout(() => row.remove(), 4000);
+    } catch (e) {
+      state.textContent = 'Fehler: ' + e.message; state.className = 'err';
+      if (e instanceof AuthError) { adminError(e); return; }
+      if (/insufficient_space/.test(e.body || '')) { status('Dropbox ist voll – bitte alte Dateien löschen.', 'err'); break; }
+    }
+  }
+  if (okCount) {
+    try { await saveSettings(); } catch (e) {}
+    status(okCount + ' Datei(en) hochgeladen – der Player übernimmt sie in ca. einer Minute.', 'ok');
+    if (A.folder === folder) openFolder(folder);
+    renderPrograms();
+  }
+}
+
+async function startAdmin(err) {
+  document.body.className = '';
+  if (!Auth.connected() || err) { showSetup('admin', err); return; }
+  $('#admin').hidden = false;
+  $('#logoutBtn').onclick = async () => { if (!confirm('Dieses Gerät von Dropbox abmelden?')) return; await Auth.logout(); location.reload(); };
+  $('#closeFolderBtn').onclick = () => { A.folder = null; $('#folderCard').hidden = true; };
+  $('#fileInput').onchange = e => { const fl = [...e.target.files]; e.target.value = ''; uploadFiles(fl); };
+  const drop = $('#drop');
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); uploadFiles([...e.dataTransfer.files]); });
+  $('#newProgBtn').onclick = async () => {
+    const n = (prompt('Name des neuen Programms (z. B. „Weihnachtsfeier“):') || '').trim();
+    if (!n) return;
+    if (/[\\/:*?"<>|]/.test(n) || n.toLowerCase() === MUSIC_FOLDER.toLowerCase()) { alert('Dieser Name ist nicht möglich.'); return; }
+    try { await Dbx.createFolder('/' + n); await renderPrograms(); openFolder(n); } catch (e) { adminError(e); }
+  };
+  $('#delFolderBtn').onclick = async () => {
+    const n = A.folder; if (!n || n === MUSIC_FOLDER) return;
+    if (!confirm('Programm „' + n + '“ mit ALLEN Dateien darin löschen?\n(In der Dropbox 30 Tage wiederherstellbar.)')) return;
+    try {
+      await Dbx.remove('/' + n);
+      A.settings.programs = A.settings.programs.filter(x => x.toLowerCase() !== n.toLowerCase());
+      await saveSettings(); A.folder = null; $('#folderCard').hidden = true; status('Programm „' + n + '“ gelöscht.', 'ok'); renderPrograms();
+    } catch (e) { adminError(e); }
+  };
+  const f = $('#settingsForm');
+  f.addEventListener('submit', e => e.preventDefault());
+  f.addEventListener('input', e => {
+    $('#saveMsg').textContent = 'Nicht gespeicherte Änderungen'; $('#saveMsg').className = 'hint';
+    if (e.target.type === 'range') f.querySelector(`output[data-for="${e.target.name}"]`).textContent = e.target.value + ' %';
+  });
+  $('#saveBtn').onclick = async () => {
+    $('#saveBtn').disabled = true;
+    try { readForm(); await saveSettings('Gespeichert – der Player übernimmt die Einstellungen in ca. einer Minute.'); fillForm(); }
+    catch (e) { adminError(e); }
+    $('#saveBtn').disabled = false;
+  };
+  try {
+    A.settings = await loadSettings();
+    fillForm();
+    await renderPrograms();
+  } catch (e) { adminError(e); }
+}
+
+/* =========================================================================
+   START
+   ========================================================================= */
+(async function main() {
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  let mode = location.hash === '#admin' ? 'admin' : 'player', err = null;
+  const q = new URLSearchParams(location.search);
+  if (q.has('code') || q.has('error')) {
+    try { const r = await Auth.handleRedirect(); if (r) { mode = r.mode; err = r.error || null; } }
+    catch (e) { err = 'Anmeldung fehlgeschlagen: ' + e.message; history.replaceState(null, '', REDIRECT); }
+  }
+  window.addEventListener('hashchange', () => location.reload());
+  if (mode === 'admin') startAdmin(err); else startPlayer(err);
+})();
+</script>
+</body>
+</html>
