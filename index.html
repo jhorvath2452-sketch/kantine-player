@@ -47,6 +47,12 @@ body.hide-cursor,body.hide-cursor *{cursor:none!important}
 #playBtn:hover,#playBtn:focus-visible{transform:scale(1.05);outline:none}
 #playBtn svg{width:42%;height:42%;margin-left:8%}
 #startInfo{color:#888;font-size:clamp(12px,1vw,18px)}
+#linkFrame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000;z-index:8}
+.linkform{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.linkform input[type=text]{flex:1 1 180px}
+.linkform #linkUrl{flex:2 1 260px}
+.prog .url{color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prog .btns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 
 /* ---------- Setup + Admin ---------- */
 .wrap{max-width:1040px;margin:0 auto;padding:24px 16px 64px}
@@ -179,6 +185,19 @@ output{min-width:40px;text-align:right;color:var(--muted);font-variant-numeric:t
       </div>
     </section>
 
+    <section class="card">
+      <div class="card-h"><h2>Links (z. B. Spiel-Replay)</h2><button class="btn" id="stopLinkBtn">Link am Player beenden</button></div>
+      <p class="hint">Webseiten, die der Player anzeigt – z. B. das Spiel auf zone14. „Jetzt zeigen“ schaltet den Player innerhalb von ca. einer Minute auf den Link um. Angehakte Links werden zusätzlich regelmäßig eingeblendet (siehe Einstellungen → Links).</p>
+      <div id="linkList"><div class="empty">Lade …</div></div>
+      <div class="linkform">
+        <input type="text" id="linkName" placeholder="Name, z. B. Heimspiel vs. XY" autocomplete="off">
+        <input type="text" id="linkUrl" placeholder="https://replay.zone14.ai/matches/…" autocomplete="off" spellcheck="false">
+        <span class="unit"><input type="number" id="linkMin" min="0" max="300" value="10"> Min.</span>
+        <button class="btn" id="addLinkBtn">+ Link hinzufügen</button>
+      </div>
+      <p class="hint">Dauer = wie lange der Link angezeigt wird. 0 = bis zum Beenden (am Kantinen-PC <b>Strg+W</b> bzw. Taste <b>L</b>, oder hier „Link am Player beenden“).</p>
+    </section>
+
     <section class="card" id="folderCard" hidden>
       <div class="card-h">
         <h2 id="folderTitle"></h2>
@@ -230,6 +249,12 @@ output{min-width:40px;text-align:right;color:var(--muted);font-variant-numeric:t
             <span class="unit"><input type="range" name="musicVolume" min="0" max="100" step="5"><output data-for="musicVolume"></output></span></label>
           <label class="row check"><input type="checkbox" name="musicDuck"><span>Musik leiser, während ein Video mit Ton läuft</span></label>
         </fieldset>
+        <fieldset><legend>Links</legend>
+          <label class="row"><span>Angehakte Links automatisch einblenden alle (0 = nur über „Jetzt zeigen“ / Taste L)</span>
+            <span class="unit"><input type="number" name="linkEvery" min="0" max="600" step="1"> Min. Diashow</span></label>
+          <label class="row"><span>Anzeigeart</span>
+            <select name="linkMode"><option value="window">Eigenes Fenster (empfohlen für Seiten mit Login)</option><option value="embed">Im Player eingebettet</option></select></label>
+        </fieldset>
         <fieldset><legend>Technik</legend>
           <label class="row"><span>Zusätzlich auf neue Dateien prüfen alle</span>
             <span class="unit"><input type="number" name="refreshMinutes" min="1" max="120" step="1"> Min.</span></label>
@@ -242,7 +267,7 @@ output{min-width:40px;text-align:right;color:var(--muted);font-variant-numeric:t
     </section>
 
     <p class="hint">Fotos: JPG, PNG, WEBP, GIF · Videos: MP4 (H.264, max. Full HD empfohlen), WEBM · Musik: MP3, M4A, AAC, OGG, WAV.<br>
-      Am Kantinen-PC: Pfeil rechts = nächstes Bild/Video · Alt+F4 = Player beenden.</p>
+      Am Kantinen-PC: Pfeil rechts = nächstes Bild/Video · L = Link zeigen/beenden · Strg+W = Link-Fenster schließen · Alt+F4 = Player beenden.</p>
   </div>
 </div>
 
@@ -264,7 +289,8 @@ const DEFAULTS = {
   kenBurns: false, showClock: false,
   includePhotos: true, includeVideos: true, videoSound: false, videoVolume: 80, videoMaxSeconds: 0,
   music: false, musicVolume: 40, musicDuck: true,
-  refreshMinutes: 10, updated: ''
+  refreshMinutes: 10, updated: '',
+  links: [], linkEvery: 0, linkMode: 'window', linkNow: null, linkStop: 0
 };
 const IMG = ['jpg','jpeg','png','gif','webp','bmp'];
 const VID = ['mp4','m4v','webm','mov'];
@@ -423,7 +449,10 @@ const Dbx = {
 async function loadSettings() {
   const txt = await Dbx.getText('/settings.json');
   let s = {}; if (txt) { try { s = JSON.parse(txt); } catch (e) {} }
-  return Object.assign({}, DEFAULTS, s);
+  const r = Object.assign({}, DEFAULTS, s);
+  r.links = Array.isArray(r.links) ? r.links.slice() : [];
+  r.programs = Array.isArray(r.programs) ? r.programs.slice() : [];
+  return r;
 }
 async function listPrograms() {
   const root = await Dbx.listAll('', false);
@@ -491,7 +520,8 @@ const MediaCache = {
 const P = {
   settings: Object.assign({}, DEFAULTS), settingsRev: null, items: [], music: [], libSig: '', lastLib: 0,
   bag: [], bagPos: 0, last: null, layer: null, timer: null, token: 0, fails: 0, started: false,
-  audio: new Audio(), musicBag: [], musicPos: 0, musicUrl: null, ducked: false, warmToken: 0, bootTime: Date.now(), wake: null
+  audio: new Audio(), musicBag: [], musicPos: 0, musicUrl: null, ducked: false, warmToken: 0, bootTime: Date.now(), wake: null,
+  inLink: false, linkWin: null, linkTimer: null, linkPoll: null, linkIdx: 0, lastLinkEnd: Date.now(), pendingLink: null
 };
 
 function fadeMs() { return P.settings.transition === 'fade' ? Math.round(P.settings.transitionSeconds * 1000) : 0; }
@@ -537,8 +567,10 @@ function prepVideo(url) {
 async function playNext() {
   clearTimeout(P.timer);
   const my = ++P.token;
+  if (P.inLink) return;
+  if (linkDue()) { const ls = activeLinks(); showLink(ls[P.linkIdx++ % ls.length]); return; }
   // Nach langer Laufzeit einmal sauber neu laden (Speicher frei machen)
-  if (Date.now() - P.bootTime > 20 * 3600 * 1000 && navigator.onLine) { location.reload(); return; }
+  if (Date.now() - P.bootTime > 20 * 3600 * 1000 && navigator.onLine && !P.inLink) { location.reload(); return; }
   const item = nextItem();
   if (!item) {
     setMsg(P.settings.programs.length ? 'Noch keine Fotos oder Videos im aktiven Programm.\nInhalte werden laufend geprüft …' : 'Kein Programm aktiviert.');
@@ -601,11 +633,12 @@ function duck(on) { P.ducked = on; applyMusicVolume(); }
 function stopMusic() { P.audio.pause(); }
 function updateMusic() {
   if (!P.started) return;
+  if (P.inLink) { stopMusic(); return; }
   if (P.settings.music && P.music.length) { if (P.audio.paused) { if (P.audio.src && !P.audio.ended) P.audio.play().catch(() => {}); else musicNext(); } }
   else stopMusic();
 }
 async function musicNext() {
-  if (!P.started || !P.settings.music || !P.music.length) { stopMusic(); return; }
+  if (!P.started || P.inLink || !P.settings.music || !P.music.length) { stopMusic(); return; }
   if (P.musicPos >= P.musicBag.length) { P.musicBag = shuffle(P.music.slice()); P.musicPos = 0; }
   const t = P.musicBag[P.musicPos++];
   try {
@@ -615,6 +648,58 @@ async function musicNext() {
     P.audio.src = P.musicUrl; applyMusicVolume();
     await P.audio.play();
   } catch (e) { setTimeout(musicNext, 5000); }
+}
+
+/* ---- Links (z. B. Spiel-Replay) ---- */
+function activeLinks() { return (P.settings.links || []).filter(l => l.active && /^https?:\/\//i.test(l.url || '')); }
+function linkDue() { const e = +P.settings.linkEvery || 0; return e > 0 && activeLinks().length > 0 && Date.now() - P.lastLinkEnd >= e * 60000; }
+function showLink(link) {
+  if (!link) return;
+  if (!P.started) { P.pendingLink = link; return; }
+  if (P.inLink) endLink(true);
+  clearTimeout(P.timer); P.token++;
+  document.querySelectorAll('#stage video').forEach(v => { v.muted = true; v.pause(); });
+  P.inLink = true; stopMusic(); setMsg('');
+  let opened = false;
+  if (P.settings.linkMode !== 'embed') {
+    try { P.linkWin = window.open(link.url, 'kp_link'); opened = !!P.linkWin; } catch (e) { P.linkWin = null; }
+  }
+  if (opened) P.linkPoll = setInterval(checkLinkWin, 2000);
+  else {
+    $('#player').append(h('iframe', { id: 'linkFrame', src: link.url, allow: 'autoplay; fullscreen; encrypted-media; picture-in-picture', allowfullscreen: true, referrerpolicy: 'no-referrer-when-downgrade' }));
+    setTimeout(() => { try { window.focus(); } catch (e) {} }, 1500);
+  }
+  const min = +link.minutes || 0;
+  if (min > 0) P.linkTimer = setTimeout(() => endLink(), min * 60000);
+}
+function checkLinkWin() { if (P.inLink && P.linkWin && P.linkWin.closed) endLink(); }
+function endLink(silent) {
+  if (!P.inLink) return;
+  P.inLink = false; clearTimeout(P.linkTimer); clearInterval(P.linkPoll);
+  if (P.linkWin && !P.linkWin.closed) { try { P.linkWin.close(); } catch (e) {} }
+  P.linkWin = null;
+  const f = $('#linkFrame'); if (f) f.remove();
+  P.lastLinkEnd = Date.now();
+  try { window.focus(); } catch (e) {}
+  if (!silent) { playNext(); updateMusic(); }
+}
+function toggleLink() {
+  if (P.inLink) { endLink(); return; }
+  const ls = activeLinks().length ? activeLinks() : (P.settings.links || []).filter(l => /^https?:\/\//i.test(l.url || ''));
+  if (ls.length) showLink(ls[P.linkIdx++ % ls.length]);
+}
+// Befehle aus der Verwaltung („Jetzt zeigen“ / „Beenden“)
+function handleRemote() {
+  const s = P.settings, now = Date.now(), ev = [];
+  if (s.linkNow && s.linkNow.ts > LS.get('linkNowSeen', 0)) ev.push({ ts: s.linkNow.ts, show: s.linkNow.id });
+  if (s.linkStop && s.linkStop > LS.get('linkStopSeen', 0)) ev.push({ ts: s.linkStop, stop: true });
+  ev.sort((a, b) => a.ts - b.ts);
+  for (const e of ev) {
+    if (e.stop) LS.set('linkStopSeen', e.ts); else LS.set('linkNowSeen', e.ts);
+    if (Math.abs(now - e.ts) > 15 * 60000) continue;           // alte Befehle ignorieren
+    if (e.stop) { P.pendingLink = null; endLink(); }
+    else { const l = (s.links || []).find(x => x.id === e.show); if (l) showLink(l); }
+  }
 }
 
 /* ---- Laden & Aktualisieren ---- */
@@ -643,6 +728,7 @@ async function refreshAll(force) {
     P.settings = await loadSettings(); P.settingsRev = rev;
     LS.set('settings', P.settings); LS.set('settingsRev', rev);
     applySettings(); libNeeded = true;
+    handleRemote();
   }
   if (libNeeded) { setLibrary(await loadLibrary(P.settings)); P.lastLib = Date.now(); }
 }
@@ -663,7 +749,10 @@ function begin() {
   $('#startScreen').hidden = true;
   if (!document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
   keepAwake();
-  rebuildBag(); playNext(); updateMusic();
+  P.lastLinkEnd = Date.now();
+  rebuildBag();
+  if (P.pendingLink) { const l = P.pendingLink; P.pendingLink = null; showLink(l); return; }
+  playNext(); updateMusic();
 }
 
 async function startPlayer(err) {
@@ -679,10 +768,13 @@ async function startPlayer(err) {
   // Mauszeiger ausblenden, wenn er nicht bewegt wird
   let mt; const showCursor = () => { document.body.classList.remove('hide-cursor'); clearTimeout(mt); mt = setTimeout(() => document.body.classList.add('hide-cursor'), 2500); };
   document.addEventListener('mousemove', showCursor); showCursor();
-  document.addEventListener('visibilitychange', keepAwake);
+  document.addEventListener('visibilitychange', () => { keepAwake(); checkLinkWin(); });
+  window.addEventListener('focus', checkLinkWin);
   document.addEventListener('keydown', e => {
     if (!P.started && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); begin(); }
-    else if (P.started && e.key === 'ArrowRight') playNext();
+    else if (P.started && (e.key === 'l' || e.key === 'L')) toggleLink();
+    else if (P.started && e.key === 'Escape' && P.inLink) endLink();
+    else if (P.started && e.key === 'ArrowRight' && !P.inLink) playNext();
   });
   $('#playBtn').addEventListener('click', begin);
 
@@ -752,6 +844,34 @@ function readForm() {
   ['kenBurns', 'showClock', 'includePhotos', 'includeVideos', 'videoSound', 'music', 'musicDuck'].forEach(k => s[k] = f.elements[k].checked);
   s.videoVolume = num('videoVolume', 0, 100); s.videoMaxSeconds = num('videoMaxSeconds', 0, 600);
   s.musicVolume = num('musicVolume', 0, 100); s.refreshMinutes = num('refreshMinutes', 1, 120);
+  s.linkEvery = num('linkEvery', 0, 600); s.linkMode = f.elements.linkMode.value;
+}
+
+function renderLinks() {
+  const box = $('#linkList'); box.replaceChildren();
+  const ls = A.settings.links || (A.settings.links = []);
+  if (!ls.length) { box.append(h('div', { class: 'empty' }, 'Noch keine Links. Unten Name, Adresse und Dauer eingeben.')); return; }
+  for (const l of ls) {
+    const cb = h('input', { type: 'checkbox', 'aria-label': 'Link ' + l.name + ' regelmäßig einblenden', title: 'Regelmäßig einblenden' }); cb.checked = !!l.active;
+    cb.addEventListener('change', async () => {
+      l.active = cb.checked;
+      try { await saveSettings(); status(cb.checked ? '„' + l.name + '“ wird regelmäßig eingeblendet' + (A.settings.linkEvery > 0 ? ' (alle ' + A.settings.linkEvery + ' Min.).' : ' – dafür unter Einstellungen → Links ein Intervall eintragen.') : '„' + l.name + '“ wird nicht mehr automatisch eingeblendet.', 'ok'); }
+      catch (e) { cb.checked = !cb.checked; l.active = cb.checked; adminError(e); }
+    });
+    const show = h('button', { class: 'btn small primary', onclick: async () => {
+      A.settings.linkNow = { id: l.id, ts: Date.now() };
+      try { await saveSettings(); status('„' + l.name + '“ erscheint am Player in ca. einer Minute.', 'ok'); } catch (e) { adminError(e); }
+    } }, 'Jetzt zeigen');
+    const del = h('button', { class: 'btn small danger', onclick: async () => {
+      if (!confirm('Link „' + l.name + '“ löschen?')) return;
+      A.settings.links = A.settings.links.filter(x => x.id !== l.id);
+      try { await saveSettings(); renderLinks(); } catch (e) { adminError(e); }
+    } }, 'Löschen');
+    box.append(h('div', { class: 'prog' }, cb,
+      h('div', { class: 'grow' }, h('div', { class: 'name' }, l.name, h('span', { class: 'tag' }, l.minutes > 0 ? l.minutes + ' Min.' : 'bis Beenden')),
+        h('div', { class: 'url', title: l.url }, l.url)),
+      h('div', { class: 'btns' }, show, del)));
+  }
 }
 
 async function renderPrograms() {
@@ -904,6 +1024,19 @@ async function startAdmin(err) {
       await saveSettings(); A.folder = null; $('#folderCard').hidden = true; status('Programm „' + n + '“ gelöscht.', 'ok'); renderPrograms();
     } catch (e) { adminError(e); }
   };
+  $('#addLinkBtn').onclick = async () => {
+    const url = $('#linkUrl').value.trim(), name = $('#linkName').value.trim() || url.replace(/^https?:\/\//, '').slice(0, 40);
+    const min = Math.max(0, Math.min(300, parseInt($('#linkMin').value, 10) || 0));
+    if (!/^https?:\/\/\S+$/i.test(url)) { status('Bitte eine vollständige Adresse eingeben, beginnend mit https://', 'err'); return; }
+    A.settings.links = A.settings.links || [];
+    A.settings.links.push({ id: Date.now().toString(36), name, url, minutes: min, active: false });
+    try { await saveSettings(); $('#linkName').value = ''; $('#linkUrl').value = ''; renderLinks(); status('Link „' + name + '“ hinzugefügt.', 'ok'); }
+    catch (e) { A.settings.links.pop(); adminError(e); }
+  };
+  $('#stopLinkBtn').onclick = async () => {
+    A.settings.linkStop = Date.now();
+    try { await saveSettings(); status('Der Player kehrt in ca. einer Minute zur Diashow zurück.', 'ok'); } catch (e) { adminError(e); }
+  };
   const f = $('#settingsForm');
   f.addEventListener('submit', e => e.preventDefault());
   f.addEventListener('input', e => {
@@ -918,7 +1051,7 @@ async function startAdmin(err) {
   };
   try {
     A.settings = await loadSettings();
-    fillForm();
+    fillForm(); renderLinks();
     await renderPrograms();
   } catch (e) { adminError(e); }
 }
