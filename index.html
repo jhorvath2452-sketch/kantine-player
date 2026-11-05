@@ -53,6 +53,9 @@ body.hide-cursor,body.hide-cursor *{cursor:none!important}
 .linkform #linkUrl{flex:2 1 260px}
 .prog .url{color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .prog .btns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.ctlgrid{display:grid;grid-template-columns:repeat(7,auto);gap:6px}
+.ctlgrid .btn{justify-content:center}
+@media (max-width:700px){ .ctlgrid{grid-template-columns:repeat(3,1fr);width:100%} .ctlgrid .ctl-pause{order:9;grid-column:1/-1} }
 
 /* ---------- Setup + Admin ---------- */
 .wrap{max-width:1040px;margin:0 auto;padding:24px 16px 64px}
@@ -189,12 +192,16 @@ output{min-width:40px;text-align:right;color:var(--muted);font-variant-numeric:t
       <div class="card-h"><h2>Links (z. B. Spiel-Replay)</h2><button class="btn" id="stopLinkBtn">Link am Player beenden</button></div>
       <p class="hint">Webseiten, die der Player anzeigt – z. B. das Spiel auf zone14. „Jetzt zeigen“ schaltet den Player innerhalb von ca. einer Minute auf den Link um. Angehakte Links werden zusätzlich regelmäßig eingeblendet (siehe Einstellungen → Links).</p>
       <div id="linkList"><div class="empty">Lade …</div></div>
-      <div class="prog" style="border-top:1px solid var(--line)">
-        <div class="grow"><div class="name">Video steuern</div><div class="meta">wirkt auf das gerade laufende Replay, nach ca. 5–10 Sekunden</div></div>
-        <div class="btns">
+      <div class="prog" style="border-top:1px solid var(--line);flex-wrap:wrap">
+        <div class="grow" style="min-width:200px"><div class="name">Video steuern</div><div class="meta">wirkt auf das gerade laufende Replay, nach ca. 5–10 Sekunden</div></div>
+        <div class="ctlgrid">
+          <button class="btn small" data-cmd="seek" data-sec="-300">« 5 min</button>
+          <button class="btn small" data-cmd="seek" data-sec="-60">« 1 min</button>
           <button class="btn small" data-cmd="seek" data-sec="-30">« 30 s</button>
-          <button class="btn small" data-cmd="toggle">Pause / Weiter</button>
+          <button class="btn small ctl-pause" data-cmd="toggle">Pause / Weiter</button>
           <button class="btn small" data-cmd="seek" data-sec="30">30 s »</button>
+          <button class="btn small" data-cmd="seek" data-sec="60">1 min »</button>
+          <button class="btn small" data-cmd="seek" data-sec="300">5 min »</button>
         </div>
       </div>
       <div class="linkform">
@@ -1077,7 +1084,8 @@ async function startAdmin(err) {
     const c = { ts: Date.now(), cmd: b.dataset.cmd, sec: +b.dataset.sec || 0 };
     A.settings.linkCmds = (A.settings.linkCmds || []).filter(x => Date.now() - x.ts < 5 * 60000).concat([c]).slice(-10);
     b.disabled = true;
-    try { await saveSettings(); status((c.cmd === 'toggle' ? 'Pause/Weiter' : (c.sec > 0 ? '30 s vor' : '30 s zurück')) + ' gesendet – wirkt in ca. 5–10 Sekunden.', 'ok'); }
+    try { await saveSettings(); const amt = Math.abs(c.sec) >= 60 ? (Math.abs(c.sec) / 60) + ' min' : Math.abs(c.sec) + ' s';
+      status((c.cmd === 'toggle' ? 'Pause/Weiter' : amt + (c.sec > 0 ? ' vor' : ' zurück')) + ' gesendet – wirkt in ca. 5–10 Sekunden.', 'ok'); }
     catch (e) { adminError(e); }
     b.disabled = false;
   });
