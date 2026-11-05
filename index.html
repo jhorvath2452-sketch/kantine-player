@@ -190,7 +190,7 @@ output{min-width:40px;text-align:right;color:var(--muted);font-variant-numeric:t
 
     <section class="card">
       <div class="card-h"><h2>Links (z. B. Spiel-Replay)</h2><button class="btn" id="stopLinkBtn">Link am Player beenden</button></div>
-      <p class="hint">Webseiten, die der Player anzeigt – z. B. das Spiel auf zone14. „Jetzt zeigen“ schaltet den Player innerhalb von ca. einer Minute auf den Link um. Angehakte Links werden zusätzlich regelmäßig eingeblendet (siehe Einstellungen → Links).</p>
+      <p class="hint"><b>Haken = anzeigen</b> – wie bei den Programmen: Angehakte Links laufen anstelle der Fotos; Haken umsetzen wechselt zwischen den Links, alle Haken weg = wieder Fotos. Sind mehrere angehakt, wechseln sie sich nach ihrer Dauer ab. Soll die Diashow dazwischen laufen, unter Einstellungen → Links ein Intervall eintragen. „Jetzt zeigen“ zeigt einen Link einmalig, ohne Haken.</p>
       <div id="linkList"><div class="empty">Lade …</div></div>
       <div class="prog" style="border-top:1px solid var(--line);flex-wrap:wrap">
         <div class="grow" style="min-width:200px"><div class="name">Video steuern</div><div class="meta">wirkt auf das gerade laufende Replay, nach ca. 5–10 Sekunden</div></div>
@@ -206,11 +206,12 @@ output{min-width:40px;text-align:right;color:var(--muted);font-variant-numeric:t
       </div>
       <div class="linkform">
         <input type="text" id="linkName" placeholder="Name, z. B. Heimspiel vs. XY" autocomplete="off">
-        <input type="text" id="linkUrl" placeholder="https://replay.zone14.ai/matches/…" autocomplete="off" spellcheck="false">
+        <input type="text" id="linkUrl" placeholder="https://replay.zone14.ai/matches/… oder YouTube-Link" autocomplete="off" spellcheck="false">
         <span class="unit"><input type="number" id="linkMin" min="0" max="300" value="10"> Min.</span>
         <button class="btn" id="addLinkBtn">+ Link hinzufügen</button>
       </div>
-      <p class="hint">Dauer = wie lange der Link angezeigt wird. 0 = bis zum Beenden (am Kantinen-PC <b>Strg+W</b> bzw. Taste <b>L</b>, oder hier „Link am Player beenden“).</p>
+      <p class="hint"><b>YouTube</b>-Links (Video, Shorts, Livestream oder Playlist) laufen direkt im Player – im Vollbild, mit Autostart, und kehren am Ende von selbst zur Diashow zurück.</p>
+      <p class="hint">Dauer = wie lange der Link angezeigt wird. 0 = bis zum Beenden bzw. bei YouTube bis das Video zu Ende ist (am Kantinen-PC <b>Strg+W</b> bzw. Taste <b>L</b>, oder hier „Link am Player beenden“).</p>
     </section>
 
     <section class="card" id="folderCard" hidden>
@@ -265,8 +266,8 @@ output{min-width:40px;text-align:right;color:var(--muted);font-variant-numeric:t
           <label class="row check"><input type="checkbox" name="musicDuck"><span>Musik leiser, während ein Video mit Ton läuft</span></label>
         </fieldset>
         <fieldset><legend>Links</legend>
-          <label class="row"><span>Angehakte Links automatisch einblenden alle (0 = nur über „Jetzt zeigen“ / Taste L)</span>
-            <span class="unit"><input type="number" name="linkEvery" min="0" max="600" step="1"> Min. Diashow</span></label>
+          <label class="row"><span>Diashow zwischen den angehakten Links (0 = Links laufen ohne Fotos dazwischen)</span>
+            <span class="unit"><input type="number" name="linkEvery" min="0" max="600" step="1"> Min.</span></label>
           <label class="row"><span>Anzeigeart</span>
             <select name="linkMode"><option value="window">Eigenes Fenster (empfohlen für Seiten mit Login)</option><option value="embed">Im Player eingebettet</option></select></label>
         </fieldset>
@@ -537,7 +538,7 @@ const P = {
   settings: Object.assign({}, DEFAULTS), settingsRev: null, items: [], music: [], libSig: '', lastLib: 0,
   bag: [], bagPos: 0, last: null, layer: null, timer: null, token: 0, fails: 0, started: false,
   audio: new Audio(), musicBag: [], musicPos: 0, musicUrl: null, ducked: false, warmToken: 0, bootTime: Date.now(), wake: null,
-  inLink: false, linkWin: null, linkTimer: null, linkPoll: null, linkIdx: 0, lastLinkEnd: Date.now(), pendingLink: null
+  inLink: false, linkWin: null, linkTimer: null, linkPoll: null, linkIdx: 0, lastLinkEnd: Date.now(), pendingLink: null, yt: null, curLink: null, curAuto: false, autoOff: false, linkFailed: {}
 };
 
 function fadeMs() { return P.settings.transition === 'fade' ? Math.round(P.settings.transitionSeconds * 1000) : 0; }
@@ -584,7 +585,7 @@ async function playNext() {
   clearTimeout(P.timer);
   const my = ++P.token;
   if (P.inLink) return;
-  if (linkDue()) { const ls = activeLinks(); showLink(ls[P.linkIdx++ % ls.length]); return; }
+  if (linkDue()) { const ls = activeLinks(); showLink(ls[P.linkIdx++ % ls.length], true); return; }
   // Nach langer Laufzeit einmal sauber neu laden (Speicher frei machen)
   if (Date.now() - P.bootTime > 20 * 3600 * 1000 && navigator.onLine && !P.inLink) { location.reload(); return; }
   const item = nextItem();
@@ -667,15 +668,35 @@ async function musicNext() {
 }
 
 /* ---- Links (z. B. Spiel-Replay) ---- */
-function activeLinks() { return (P.settings.links || []).filter(l => l.active && /^https?:\/\//i.test(l.url || '')); }
-function linkDue() { const e = +P.settings.linkEvery || 0; return e > 0 && activeLinks().length > 0 && Date.now() - P.lastLinkEnd >= e * 60000; }
-function showLink(link) {
+function activeLinks() { return (P.settings.links || []).filter(l => l.active && !P.linkFailed[l.id] && /^https?:\/\//i.test(l.url || '')); }
+// Angehakte Links: bei Intervall 0 laufen sie anstelle der Fotos, sonst im Wechsel mit der Diashow
+function linkDue() {
+  if (P.autoOff || !activeLinks().length) return false;
+  const e = +P.settings.linkEvery || 0;
+  return e === 0 || Date.now() - P.lastLinkEnd >= e * 60000;
+}
+function linkSig(s) { return JSON.stringify([(s.links || []).map(l => [l.id, !!l.active, l.url, l.minutes]), +s.linkEvery || 0]); }
+// Nach geänderten Haken: Player sofort anpassen
+function reconcileLinks() {
+  if (!P.started) return;
+  if (P.inLink && P.curAuto) {
+    const still = activeLinks().some(l => l.id === P.curLink.id && l.url === P.curLink.url);
+    if (!still) { endLink(); return; }                       // Haken entfernt → nächster Link bzw. Fotos
+  }
+  if (!P.inLink && linkDue() && (+P.settings.linkEvery || 0) === 0) playNext();   // Haken gesetzt → sofort umschalten
+}
+function showLink(link, auto) {
   if (!link) return;
   if (!P.started) { P.pendingLink = link; return; }
   if (P.inLink) endLink(true);
+  P.curLink = link; P.curAuto = !!auto;
   clearTimeout(P.timer); P.token++;
   document.querySelectorAll('#stage video').forEach(v => { v.muted = true; v.pause(); });
   P.inLink = true; stopMusic(); setMsg('');
+  const min = +link.minutes || 0;
+  if (min > 0) P.linkTimer = setTimeout(() => endLink(), min * 60000);
+  const yt = ytInfo(link.url);
+  if (yt) { showYouTube(yt, min); return; }
   let opened = false;
   if (P.settings.linkMode !== 'embed') {
     try { P.linkWin = window.open(link.url, 'kp_link'); opened = !!P.linkWin; } catch (e) { P.linkWin = null; }
@@ -685,24 +706,89 @@ function showLink(link) {
     $('#player').append(h('iframe', { id: 'linkFrame', src: link.url, allow: 'autoplay; fullscreen; encrypted-media; picture-in-picture', allowfullscreen: true, referrerpolicy: 'no-referrer-when-downgrade' }));
     setTimeout(() => { try { window.focus(); } catch (e) {} }, 1500);
   }
-  const min = +link.minutes || 0;
-  if (min > 0) P.linkTimer = setTimeout(() => endLink(), min * 60000);
 }
-function checkLinkWin() { if (P.inLink && P.linkWin && P.linkWin.closed) endLink(); }
-function endLink(silent) {
+
+/* ---- YouTube (eingebettet über die offizielle IFrame-API) ---- */
+function ytInfo(url) {
+  let u; try { u = new URL(url); } catch (e) { return null; }
+  const host = u.hostname.replace(/^www\.|^m\.|^music\./, '');
+  let id = null;
+  if (host === 'youtu.be') id = u.pathname.slice(1).split('/')[0];
+  else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+    if (u.pathname === '/watch') id = u.searchParams.get('v');
+    else { const m = u.pathname.match(/^\/(embed|shorts|live|v)\/([\w-]{6,})/); if (m) id = m[2]; }
+    if (!id && u.searchParams.get('list')) id = '';
+  } else return null;
+  if (id === null) return null;
+  const t = u.searchParams.get('t') || u.searchParams.get('start') || '';
+  let start = 0, m;
+  if (/^\d+$/.test(t)) start = +t;
+  else if ((m = t.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/))) start = (+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0);
+  return { id, list: u.searchParams.get('list') || '', start };
+}
+let ytApi = null;
+function loadYT() {
+  if (window.YT && window.YT.Player) return Promise.resolve();
+  if (!ytApi) ytApi = new Promise((res, rej) => {
+    window.onYouTubeIframeAPIReady = () => res();
+    const sc = document.createElement('script'); sc.src = 'https://www.youtube.com/iframe_api';
+    sc.onerror = () => { ytApi = null; rej(new Error('YouTube nicht erreichbar')); };
+    document.head.append(sc);
+  });
+  return ytApi;
+}
+async function showYouTube(yt, min) {
+  const box = h('div', { id: 'linkFrame' });
+  $('#player').append(box);
+  try { await loadYT(); } catch (e) { setMsg('YouTube ist gerade nicht erreichbar.'); if (P.curLink) P.linkFailed[P.curLink.id] = true; setTimeout(() => { setMsg(''); endLink(); }, 6000); return; }
+  if (!P.inLink || !box.isConnected) return;
+  const vars = { autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, iv_load_policy: 3, playsinline: 1, start: yt.start || 0 };
+  if (yt.list) { vars.listType = 'playlist'; vars.list = yt.list; }
+  P.yt = new YT.Player(box, {
+    width: '100%', height: '100%', videoId: yt.id || undefined, playerVars: vars,
+    events: {
+      onReady: e => {
+        const p = e.target;
+        try { p.unMute(); p.setVolume(100); p.playVideo(); } catch (x) {}
+        // Falls der Browser Ton ohne Klick verbietet: stumm starten
+        setTimeout(() => { try { if (P.yt === p && p.getPlayerState() !== 1 && p.getPlayerState() !== 3) { p.mute(); p.playVideo(); } } catch (x) {} }, 3000);
+        try { window.focus(); } catch (x) {}
+      },
+      onStateChange: e => {
+        if (e.data !== 0) return;                                  // 0 = Video zu Ende
+        const p = e.target;
+        let more = false; try { const pl = p.getPlaylist && p.getPlaylist(); more = pl && p.getPlaylistIndex() < pl.length - 1; } catch (x) {}
+        if (more) return;
+        if (min > 0) { try { p.seekTo(yt.start || 0, true); p.playVideo(); } catch (x) {} }   // feste Dauer: Video wiederholen
+        else endLink();                                            // sonst zurück zur Diashow
+      },
+      onError: e => {
+        const why = (e.data === 101 || e.data === 150 || e.data === 153) ? 'Dieses YouTube-Video darf nicht eingebettet werden.' : 'YouTube-Video kann nicht abgespielt werden (Fehler ' + e.data + ').';
+        if (P.curLink) P.linkFailed[P.curLink.id] = true;          // nicht endlos neu versuchen
+        setMsg(why); setTimeout(() => { setMsg(''); endLink(); }, 8000);
+      }
+    }
+  });
+}
+function checkLinkWin() { if (P.inLink && P.linkWin && P.linkWin.closed) endLink(false, true); }
+// manual = von Hand beendet (Strg+W, L, Esc, „Beenden“): angehakte Links dann nicht sofort wieder öffnen
+function endLink(silent, manual) {
   if (!P.inLink) return;
+  if (manual && P.curAuto && (+P.settings.linkEvery || 0) === 0) P.autoOff = true;
+  P.curLink = null; P.curAuto = false;
   P.inLink = false; clearTimeout(P.linkTimer); clearInterval(P.linkPoll);
   if (P.linkWin && !P.linkWin.closed) { try { P.linkWin.close(); } catch (e) {} }
   P.linkWin = null;
+  if (P.yt) { try { P.yt.destroy(); } catch (e) {} P.yt = null; }
   const f = $('#linkFrame'); if (f) f.remove();
   P.lastLinkEnd = Date.now();
   try { window.focus(); } catch (e) {}
   if (!silent) { playNext(); updateMusic(); }
 }
 function toggleLink() {
-  if (P.inLink) { endLink(); return; }
+  if (P.inLink) { endLink(false, true); return; }
   const ls = activeLinks().length ? activeLinks() : (P.settings.links || []).filter(l => /^https?:\/\//i.test(l.url || ''));
-  if (ls.length) showLink(ls[P.linkIdx++ % ls.length]);
+  if (ls.length) { P.autoOff = false; showLink(ls[P.linkIdx++ % ls.length], activeLinks().length > 0); }
 }
 // Befehle aus der Verwaltung („Jetzt zeigen“ / „Beenden“)
 function handleRemote() {
@@ -720,7 +806,7 @@ function handleRemote() {
     }
     if (e.stop) LS.set('linkStopSeen', e.ts); else LS.set('linkNowSeen', e.ts);
     if (Math.abs(now - e.ts) > 15 * 60000) continue;           // alte Befehle ignorieren
-    if (e.stop) { P.pendingLink = null; endLink(); }
+    if (e.stop) { P.pendingLink = null; endLink(false, true); }
     else { const l = (s.links || []).find(x => x.id === e.show); if (l) showLink(l); }
   }
 }
@@ -728,6 +814,16 @@ function handleRemote() {
 // Steuerbefehle an die Link-Seite weiterreichen (dort setzt die Erweiterung sie um)
 function sendLinkCmd(c) {
   if (!P.inLink) return;
+  if (P.yt && P.yt.getCurrentTime) {
+    try {
+      if (c.cmd === 'seek') {
+        const d = P.yt.getDuration ? P.yt.getDuration() : 0;
+        let t = P.yt.getCurrentTime() + (+c.sec || 0); t = Math.max(0, d > 0 ? Math.min(d - 1, t) : t);
+        P.yt.seekTo(t, true);
+      } else if (c.cmd === 'toggle') { if (P.yt.getPlayerState() === 1) P.yt.pauseVideo(); else P.yt.playVideo(); }
+    } catch (e) { console.warn('YouTube-Befehl fehlgeschlagen', e); }
+    return;
+  }
   const f = $('#linkFrame');
   const target = P.linkWin && !P.linkWin.closed ? P.linkWin : (f ? f.contentWindow : null);
   if (!target) return;
@@ -771,10 +867,13 @@ async function refreshAll(force) {
   const rev = m ? m.rev : 'none';
   let libNeeded = force || Date.now() - P.lastLib > P.settings.refreshMinutes * 60000;
   if (rev !== P.settingsRev) {
+    const oldSig = linkSig(P.settings);
     P.settings = await loadSettings(); P.settingsRev = rev;
+    if (linkSig(P.settings) !== oldSig) { P.autoOff = false; P.linkFailed = {}; }
     LS.set('settings', P.settings); LS.set('settingsRev', rev);
     applySettings(); libNeeded = true;
     handleRemote();
+    reconcileLinks();
   }
   if (libNeeded) { setLibrary(await loadLibrary(P.settings)); P.lastLib = Date.now(); }
 }
@@ -819,7 +918,7 @@ async function startPlayer(err) {
   document.addEventListener('keydown', e => {
     if (!P.started && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); begin(); }
     else if (P.started && (e.key === 'l' || e.key === 'L')) toggleLink();
-    else if (P.started && e.key === 'Escape' && P.inLink) endLink();
+    else if (P.started && e.key === 'Escape' && P.inLink) endLink(false, true);
     else if (P.started && e.key === 'ArrowRight' && !P.inLink) playNext();
   });
   $('#playBtn').addEventListener('click', begin);
@@ -899,10 +998,13 @@ function renderLinks() {
   const ls = A.settings.links || (A.settings.links = []);
   if (!ls.length) { box.append(h('div', { class: 'empty' }, 'Noch keine Links. Unten Name, Adresse und Dauer eingeben.')); return; }
   for (const l of ls) {
-    const cb = h('input', { type: 'checkbox', 'aria-label': 'Link ' + l.name + ' regelmäßig einblenden', title: 'Regelmäßig einblenden' }); cb.checked = !!l.active;
+    const cb = h('input', { type: 'checkbox', 'aria-label': 'Link ' + l.name + ' anzeigen',  title: 'Anzeigen' }); cb.checked = !!l.active;
     cb.addEventListener('change', async () => {
       l.active = cb.checked;
-      try { await saveSettings(); status(cb.checked ? '„' + l.name + '“ wird regelmäßig eingeblendet' + (A.settings.linkEvery > 0 ? ' (alle ' + A.settings.linkEvery + ' Min.).' : ' – dafür unter Einstellungen → Links ein Intervall eintragen.') : '„' + l.name + '“ wird nicht mehr automatisch eingeblendet.', 'ok'); }
+      const n = A.settings.links.filter(x => x.active).length, ev = +A.settings.linkEvery || 0;
+      try { await saveSettings(); status(cb.checked
+        ? '„' + l.name + '“ angehakt – ' + (ev > 0 ? 'läuft im Wechsel mit der Diashow (alle ' + ev + ' Min.).' : (n > 1 ? 'die angehakten Links laufen abwechselnd anstelle der Fotos.' : 'läuft in ca. einer Minute anstelle der Fotos.'))
+        : '„' + l.name + '“ abgehakt – ' + (n ? 'der Player wechselt zum nächsten angehakten Link.' : 'der Player zeigt wieder die Fotos.'), 'ok'); }
       catch (e) { cb.checked = !cb.checked; l.active = cb.checked; adminError(e); }
     });
     const show = h('button', { class: 'btn small primary', onclick: async () => {
