@@ -189,6 +189,14 @@ output{min-width:40px;text-align:right;color:var(--muted);font-variant-numeric:t
       <div class="card-h"><h2>Links (z. B. Spiel-Replay)</h2><button class="btn" id="stopLinkBtn">Link am Player beenden</button></div>
       <p class="hint">Webseiten, die der Player anzeigt – z. B. das Spiel auf zone14. „Jetzt zeigen“ schaltet den Player innerhalb von ca. einer Minute auf den Link um. Angehakte Links werden zusätzlich regelmäßig eingeblendet (siehe Einstellungen → Links).</p>
       <div id="linkList"><div class="empty">Lade …</div></div>
+      <div class="prog" style="border-top:1px solid var(--line)">
+        <div class="grow"><div class="name">Video steuern</div><div class="meta">wirkt auf das gerade laufende Replay, nach ca. 5–10 Sekunden</div></div>
+        <div class="btns">
+          <button class="btn small" data-cmd="seek" data-sec="-30">« 30 s</button>
+          <button class="btn small" data-cmd="toggle">Pause / Weiter</button>
+          <button class="btn small" data-cmd="seek" data-sec="30">30 s »</button>
+        </div>
+      </div>
       <div class="linkform">
         <input type="text" id="linkName" placeholder="Name, z. B. Heimspiel vs. XY" autocomplete="off">
         <input type="text" id="linkUrl" placeholder="https://replay.zone14.ai/matches/…" autocomplete="off" spellcheck="false">
@@ -290,7 +298,7 @@ const DEFAULTS = {
   includePhotos: true, includeVideos: true, videoSound: false, videoVolume: 80, videoMaxSeconds: 0,
   music: false, musicVolume: 40, musicDuck: true,
   refreshMinutes: 10, updated: '',
-  links: [], linkEvery: 0, linkMode: 'window', linkNow: null, linkStop: 0
+  links: [], linkEvery: 0, linkMode: 'window', linkNow: null, linkStop: 0, linkCmds: []
 };
 const IMG = ['jpg','jpeg','png','gif','webp','bmp'];
 const VID = ['mp4','m4v','webm','mov'];
@@ -451,6 +459,7 @@ async function loadSettings() {
   let s = {}; if (txt) { try { s = JSON.parse(txt); } catch (e) {} }
   const r = Object.assign({}, DEFAULTS, s);
   r.links = Array.isArray(r.links) ? r.links.slice() : [];
+  r.linkCmds = Array.isArray(r.linkCmds) ? r.linkCmds.slice() : [];
   r.programs = Array.isArray(r.programs) ? r.programs.slice() : [];
   return r;
 }
@@ -693,13 +702,43 @@ function handleRemote() {
   const s = P.settings, now = Date.now(), ev = [];
   if (s.linkNow && s.linkNow.ts > LS.get('linkNowSeen', 0)) ev.push({ ts: s.linkNow.ts, show: s.linkNow.id });
   if (s.linkStop && s.linkStop > LS.get('linkStopSeen', 0)) ev.push({ ts: s.linkStop, stop: true });
+  const cmdSeen = LS.get('linkCmdSeen', 0);
+  for (const c of (s.linkCmds || [])) if (c && c.ts > cmdSeen) ev.push({ ts: c.ts, cmd: c });
   ev.sort((a, b) => a.ts - b.ts);
   for (const e of ev) {
+    if (e.cmd) {
+      LS.set('linkCmdSeen', e.ts);
+      if (Math.abs(now - e.ts) < 3 * 60000) sendLinkCmd(e.cmd);
+      continue;
+    }
     if (e.stop) LS.set('linkStopSeen', e.ts); else LS.set('linkNowSeen', e.ts);
     if (Math.abs(now - e.ts) > 15 * 60000) continue;           // alte Befehle ignorieren
     if (e.stop) { P.pendingLink = null; endLink(); }
     else { const l = (s.links || []).find(x => x.id === e.show); if (l) showLink(l); }
   }
+}
+
+// Steuerbefehle an die Link-Seite weiterreichen (dort setzt die Erweiterung sie um)
+function sendLinkCmd(c) {
+  if (!P.inLink) return;
+  const f = $('#linkFrame');
+  const target = P.linkWin && !P.linkWin.closed ? P.linkWin : (f ? f.contentWindow : null);
+  if (!target) return;
+  try { target.postMessage({ kp: 'cmd', cmd: c.cmd, sec: +c.sec || 0 }, '*'); } catch (e) { console.warn('Befehl nicht zustellbar', e); }
+}
+// Schnelle Abfrage (alle 5 s), solange ein Link läuft – über einen Worker,
+// damit Chrome den Takt im Hintergrund nicht ausbremst
+function startFastPoll() {
+  let busy = false;
+  const run = async () => {
+    if (!P.inLink || busy) return;
+    busy = true;
+    try { await refreshAll(false); } catch (e) {} finally { busy = false; }
+  };
+  try {
+    const w = new Worker(URL.createObjectURL(new Blob(['setInterval(function(){postMessage(0)},5000)'], { type: 'text/javascript' })));
+    w.onmessage = run;
+  } catch (e) { setInterval(run, 5000); }
 }
 
 /* ---- Laden & Aktualisieren ---- */
@@ -782,6 +821,7 @@ async function startPlayer(err) {
   if (!P.items.length) { setMsg('Lade Inhalte aus der Dropbox …'); try { await first; } catch (e) { showSetup('player', e.message); return; } setMsg(''); }
   else warmCache();
   setTimeout(tick, 60000);
+  startFastPoll();
 
   if (P.settings.startMode === 'auto') begin();
   else {
@@ -1033,6 +1073,14 @@ async function startAdmin(err) {
     try { await saveSettings(); $('#linkName').value = ''; $('#linkUrl').value = ''; renderLinks(); status('Link „' + name + '“ hinzugefügt.', 'ok'); }
     catch (e) { A.settings.links.pop(); adminError(e); }
   };
+  document.querySelectorAll('[data-cmd]').forEach(b => b.onclick = async () => {
+    const c = { ts: Date.now(), cmd: b.dataset.cmd, sec: +b.dataset.sec || 0 };
+    A.settings.linkCmds = (A.settings.linkCmds || []).filter(x => Date.now() - x.ts < 5 * 60000).concat([c]).slice(-10);
+    b.disabled = true;
+    try { await saveSettings(); status((c.cmd === 'toggle' ? 'Pause/Weiter' : (c.sec > 0 ? '30 s vor' : '30 s zurück')) + ' gesendet – wirkt in ca. 5–10 Sekunden.', 'ok'); }
+    catch (e) { adminError(e); }
+    b.disabled = false;
+  });
   $('#stopLinkBtn').onclick = async () => {
     A.settings.linkStop = Date.now();
     try { await saveSettings(); status('Der Player kehrt in ca. einer Minute zur Diashow zurück.', 'ok'); } catch (e) { adminError(e); }
